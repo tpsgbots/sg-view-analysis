@@ -183,16 +183,21 @@ function drawViewReport(report) {
     const start = dataToWorld(0, 0, report.eye_height_m);
     const end = dataToWorld(x, y, report.eye_height_m);
     const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
-    // depthTest/depthWrite off + high renderOrder: these are diagnostic overlay
-    // data, not real light -- without this, standard z-buffer occlusion hides
-    // whatever segment of a ray happens to pass behind some UNRELATED nearby
-    // building from the current camera angle, making a correctly-classified
-    // ray look like it "cuts off in mid-air" for a reason that has nothing to
-    // do with the actual analysis. Confirmed 2026-09-10 (Wesley: "the lines
-    // are cut off at random parts").
-    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false });
+    // REVERTED 2026-09-10 (same session): tried depthTest/depthWrite:false so
+    // rays wouldn't vanish behind unrelated nearby buildings from certain
+    // camera angles ("cut off at random parts") -- but Wesley then asked for
+    // the opposite: a ray should visually stop the instant it hits ANY solid
+    // geometry, like a real light beam, not render on/through a building's own
+    // surface. Standard depth-testing (the default -- no override here) gives
+    // that behavior directly via the GPU's own z-buffer, which is more robust
+    // than trusting this file's own 2D ray-polygon math to get the visual
+    // termination point exactly right. Trade-off accepted: an OPEN ray can
+    // still be hidden behind some unrelated foreground building from an
+    // oblique angle -- but that's arguably still correct, since a real
+    // sightline beam would really be blocked from THAT camera's view by
+    // whatever's actually in front of it.
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
     const line = new THREE.Line(geo, mat);
-    line.renderOrder = 999;
     line.userData = { isSceneContent: true, isRay: true, report: d, eyeHeightM: report.eye_height_m };
     scene.add(line);
     rayGroup.push(line);
