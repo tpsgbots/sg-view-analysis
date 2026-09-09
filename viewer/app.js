@@ -116,6 +116,19 @@ function dataToWorld(x, y, z) {
   return new THREE.Vector3(x, z || 0, -y);
 }
 
+// Single source of truth for bearing -> data-space direction (0=N, 90=E,
+// clockwise), matching analyze_view.py's bearing_to_dxdy() exactly. Used by
+// BOTH the classifier (analyzeSightlinesJS) and the renderer (drawViewReport)
+// -- these must never be two separately-typed formulas again. A north-south
+// sign mismatch between them (drawViewReport had a stray negation) caused
+// every ray to render in the mirror-image direction from what it was
+// actually classified for, for this whole session, until caught via a real
+// mesh-raycast check. See LESSONS.md 2026-09-10.
+function bearingToDataDir(bearingDeg) {
+  const rad = bearingDeg * Math.PI / 180;
+  return [Math.sin(rad), Math.cos(rad)];
+}
+
 function buildBuilding(feature, isSubject, subjectMinHeight) {
   const ring = feature.geometry.coordinates[0];
   const p = feature.properties;
@@ -178,20 +191,11 @@ function drawViewReport(report) {
   for (const d of report.directions) {
     const color = d.status === 'open' ? COLOR_OPEN : d.status === 'blocked' ? COLOR_BLOCKED : COLOR_UNCERTAIN;
     const dist = d.distance_m || report.radius_m;
-    const rad = d.bearing * Math.PI / 180;
-    // REAL BUG FIXED 2026-09-10: this had "y = -Math.cos(rad) * dist" (negated) while
-    // analyzeSightlinesJS uses "dy = Math.cos(rad)" (not negated) for the identical
-    // bearing convention -- every ray was rendered pointing in the mirror-image
-    // (north-south flipped) direction from what it was actually classified for. The
-    // classification/data was always correct (why repeated data-only verification
-    // checks kept coming back clean); only the visual draw direction was wrong.
-    // Confirmed via a real three.js Raycaster test against the actual rendered
-    // building meshes (not hand-written 2D math) -- e.g. a bearing-0 (north) ray
-    // classified "open" was hitting "50 Newton Road" etc., real buildings that sit
-    // to the SOUTH of the subject, at ~200-400m, well short of its claimed 500m
-    // open endpoint. Wesley caught this via repeated "the lines are going through
-    // buildings" reports that survived a hard cache refresh -- see LESSONS.md.
-    const x = Math.sin(rad) * dist, y = Math.cos(rad) * dist; // data-space endpoint
+    // Bug fixed 2026-09-10 by switching to the shared bearingToDataDir() --
+    // see its comment and LESSONS.md for what went wrong when this was a
+    // separate, independently-signed inline formula.
+    const [dirX, dirY] = bearingToDataDir(d.bearing);
+    const x = dirX * dist, y = dirY * dist; // data-space endpoint
     const start = dataToWorld(0, 0, report.eye_height_m);
     const end = dataToWorld(x, y, report.eye_height_m);
     const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
@@ -621,8 +625,7 @@ function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHei
   const eyeHeight = (floor - 1) * metersPerStorey + eyeHeightAboveFloor;
   const directions = [];
   for (let b = 0; b < 360; b += step) {
-    const rad = b * Math.PI / 180;
-    const dx = Math.sin(rad), dy = Math.cos(rad);
+    const [dx, dy] = bearingToDataDir(b);
     let confirmed = null, uncertain = null;
     for (const f of features) {
       if (f.properties.osm_id === subjectId) continue;
