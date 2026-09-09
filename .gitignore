@@ -1,0 +1,10 @@
+# Secrets -- never commit
+.env
+
+# Generated/fetched data -- large, regeneratable via the fetch/build scripts.
+# manual_heights.json is the one hand-edited exception, keep it tracked.
+cache/*
+!cache/manual_heights.json
+
+__pycache__/
+*.pyc

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SG View Analysis</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0e1420; overflow: hidden; font-family: -apple-system, Segoe UI, Arial, sans-serif; }
+  #canvas-wrap { position: absolute; inset: 0; }
+  #hud {
+    position: absolute; top: 12px; left: 12px; z-index: 10;
+    background: rgba(15,20,30,0.85); color: #e8ecf4; padding: 12px 16px;
+    border-radius: 8px; font-size: 13px; max-width: 320px; line-height: 1.5;
+  }
+  #hud h1 { font-size: 14px; margin: 0 0 6px; color: #7fb0ff; }
+  #hud label { display: block; margin-top: 8px; color: #9aa6bb; }
+  #hud input { width: 70px; background: #1a2233; border: 1px solid #2c3752; color: #fff; border-radius: 4px; padding: 3px 6px; }
+  #hud input#address-input { width: 100%; box-sizing: border-box; }
+  #hud button { margin-top: 8px; background: #2c5cc4; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #hud button:hover { background: #386ee0; }
+  #hud details { margin-top: 10px; color: #8b96ad; font-size: 11px; }
+  #hud details summary { cursor: pointer; }
+  #info {
+    position: absolute; bottom: 12px; left: 12px; z-index: 10;
+    background: rgba(15,20,30,0.85); color: #e8ecf4; padding: 10px 14px;
+    border-radius: 8px; font-size: 12px; max-width: 340px; display: none; line-height: 1.5;
+  }
+  #info b { color: #7fb0ff; }
+  #legend {
+    position: absolute; top: 12px; right: 12px; z-index: 10;
+    background: rgba(15,20,30,0.85); color: #cbd3e1; padding: 10px 14px;
+    border-radius: 8px; font-size: 11px; line-height: 1.7;
+  }
+  #legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  #status { position: absolute; bottom: 12px; right: 12px; z-index: 10; color: #6b7690; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="canvas-wrap"></div>
+
+<div id="hud">
+  <h1>Singapore View Analysis</h1>
+  <div id="address-line">Type an address to begin</div>
+  <label>Address
+    <input id="address-input" type="text" placeholder="e.g. 55 Newton Road" value="55 Newton Road">
+  </label>
+  <label>Floor <input id="floor-input" type="number" value="12" min="1"></label>
+  <label>Radius (m) <input id="radius-input" type="number" value="500" min="100" step="50"></label>
+  <button id="go-btn">Go</button>
+  <div style="margin-top:8px; color:#8b96ad; font-size:11px;">Click a facade for its bearing, or click a ray for its blocked/open verdict (don't judge clearance by eye -- perspective lies).</div>
+  <details>
+    <summary>Load a saved file instead</summary>
+    <label>File (cache/&lt;name&gt;.geojson)
+      <input id="file-input" type="text" placeholder="55-newton-road">
+    </label>
+    <button id="load-file-btn">Load file</button>
+  </details>
+</div>
+
+<div id="info"></div>
+
+<div id="legend">
+  <div><span style="background:#5b8fd6"></span>known height</div>
+  <div><span style="background:#4a5468"></span>unknown height</div>
+  <div><span style="background:#e0a030"></span>subject building</div>
+  <div><span style="background:#3ddc6f"></span>open sightline</div>
+  <div><span style="background:#e5484d"></span>blocked sightline</div>
+  <div><span style="background:#8a93a8"></span>road</div>
+  <div><span style="background:#1d5a8f"></span>water</div>
+  <div><span style="background:#a970e0;border-radius:50%"></span>MRT station/entrance</div>
+  <div><span style="background:#30c9d6;border-radius:50%"></span>bus stop/interchange</div>
+</div>
+
+<div id="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

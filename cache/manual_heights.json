@@ -1,0 +1,5 @@
+{
+  "_readme": "Manual height overrides. Match by OSM id ('osm:12345') or by building name (case-insensitive, must match OSM's 'name' tag exactly-ish -- check the building's 'name' field in the output geojson if unsure). 'levels' x 'meters_per_storey' (default 3.0 if omitted) computes height_m, OR set 'height_m' directly to skip the multiplication entirely. Entries here always win over OSM's own building:levels tag.",
+  "by_osm_id": {},
+  "by_name": {}
+}
