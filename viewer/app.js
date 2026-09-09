@@ -116,10 +116,16 @@ function dataToWorld(x, y, z) {
   return new THREE.Vector3(x, z || 0, -y);
 }
 
-function buildBuilding(feature, isSubject) {
+function buildBuilding(feature, isSubject, subjectMinHeight) {
   const ring = feature.geometry.coordinates[0];
   const p = feature.properties;
-  const height = p.height_m || (isSubject ? 30 : 6); // unknown-height default so it still renders as a plausible mass
+  // Unknown-height fallback: a plain 6m default for regular buildings, but the
+  // SUBJECT building must render at least as tall as the floor actually being
+  // checked -- otherwise the eye-height marker/rays float visibly above the
+  // building's own rendered roof whenever checking a floor higher than the old
+  // hardcoded 30m fallback (confirmed 2026-09-10, Wesley: "something is
+  // terribly wrong" on a screenshot showing exactly this).
+  const height = p.height_m || (isSubject ? Math.max(30, subjectMinHeight || 0) : 6);
   const isKnown = !!p.height_m;
 
   const shape = new THREE.Shape();
@@ -283,11 +289,12 @@ async function loadScene(file, floor) {
     if (pointInPolygon(0, 0, f.geometry.coordinates[0])) { subjectId = f.properties.osm_id; break; }
   }
 
+  const metersPerStorey = 3.0;
+  const subjectMinHeight = (floor - 1) * metersPerStorey + 1.5 + 5; // eye height + a small margin above the marker
   for (const f of data.features) {
-    buildBuilding(f, f.properties.osm_id === subjectId);
+    buildBuilding(f, f.properties.osm_id === subjectId, subjectMinHeight);
   }
 
-  const metersPerStorey = 3.0;
   buildSubjectMarker(floor, metersPerStorey);
 
   try {
@@ -676,7 +683,8 @@ async function goToAddress(address, floor, radiusM) {
   for (const f of data.features) {
     if (pointInPolygon(0, 0, f.geometry.coordinates[0])) { subjectId = f.properties.osm_id; break; }
   }
-  for (const f of data.features) buildBuilding(f, f.properties.osm_id === subjectId);
+  const subjectMinHeight = (floor - 1) * metersPerStorey + 1.5 + 5;
+  for (const f of data.features) buildBuilding(f, f.properties.osm_id === subjectId, subjectMinHeight);
   buildSubjectMarker(floor, metersPerStorey);
 
   const report = analyzeSightlinesJS(data.features, subjectId, floor, metersPerStorey, 1.5, radiusM, 5);
