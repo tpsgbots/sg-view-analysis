@@ -58,6 +58,28 @@ This is a **horizontal-only** model — a flat line at eye height going
 straight out, not an angled line-of-sight to a specific target — and it
 assumes **flat terrain** across the search area (fine for Singapore).
 
+## Performance: radius scales the browser's RAM use quadratically
+
+Confirmed 2026-09-10: browser RAM use is fine at the 500m default but climbs
+sharply at large radii (e.g. 2km) — not because of the whole-island cache
+(that's a flat, one-time ~300-500MB load regardless of radius), but because
+the *area* being cropped and rendered scales with radius², not radius. 2km
+covers ~16x the area of 500m, so ~16x the buildings get rendered. Worse: each
+building spawns one solid mesh *plus* one invisible clickable "facade" mesh
+per polygon edge (for the click-a-facade-for-bearing feature) — averaging
+~6-7 extra three.js objects per building. At 500m that's already ~3,450
+facade planes for ~530 buildings; at 2km it can be 50,000+ individual
+objects, each carrying its own GPU buffer/geometry/material overhead
+independent of the underlying data size — that per-object overhead is likely
+the dominant RAM cost at large radii, not the raw JSON.
+
+**Not yet fixed** — the straightforward fix is to stop building facade-click
+planes for buildings beyond some fixed distance from the subject (e.g.
+300-400m, since you're not going to click a facade 1.5km away regardless of
+search radius) while still rendering their solid mass and including them in
+the sightline analysis. Worth doing before using radii much above ~800m-1km
+regularly.
+
 ## Known data limitations
 
 - **No open dataset gives real rooftop height for arbitrary private

@@ -18,7 +18,7 @@ const COLOR_BLOCKED = 0xe5484d;
 const COLOR_UNCERTAIN = 0xe0b030;
 
 let scene, camera, renderer, controls, raycaster, mouse;
-let facadeGroup = [];
+let buildingGroup = [];
 let rayGroup = [];
 let transitGroup = [];
 let hovered = null;
@@ -106,7 +106,7 @@ function clearScene() {
   for (const obj of [...scene.children]) {
     if (obj.userData.isSceneContent) scene.remove(obj);
   }
-  facadeGroup = [];
+  buildingGroup = [];
   rayGroup = [];
   transitGroup = [];
   hovered = null;
@@ -114,29 +114,6 @@ function clearScene() {
 
 function dataToWorld(x, y, z) {
   return new THREE.Vector3(x, z || 0, -y);
-}
-
-function outwardNormal(p1, p2, centroid) {
-  const ex = p2[0] - p1[0], ey = p2[1] - p1[1];
-  let nx = ey, ny = -ex;
-  const len = Math.hypot(nx, ny) || 1;
-  nx /= len; ny /= len;
-  const midx = (p1[0] + p2[0]) / 2, midy = (p1[1] + p2[1]) / 2;
-  const toMid = [midx - centroid[0], midy - centroid[1]];
-  if (nx * toMid[0] + ny * toMid[1] < 0) { nx = -nx; ny = -ny; }
-  return [nx, ny];
-}
-
-function bearingFromNormal(nx, ny) {
-  let b = Math.atan2(nx, ny) * 180 / Math.PI;
-  if (b < 0) b += 360;
-  return b;
-}
-
-function polygonCentroid(ring) {
-  let x = 0, y = 0;
-  for (const p of ring) { x += p[0]; y += p[1]; }
-  return [x / ring.length, y / ring.length];
 }
 
 function buildBuilding(feature, isSubject) {
@@ -155,38 +132,22 @@ function buildBuilding(feature, isSubject) {
   const mat = new THREE.MeshStandardMaterial({
     color, transparent: !isKnown && !isSubject, opacity: isKnown || isSubject ? 1 : 0.55,
   });
+  // Simplified 2026-09-10 (Wesley: rays already answer blocked/open, no need
+  // to click a wall for bearing) -- the whole solid mesh is now the click
+  // target itself (name + height), instead of one extra invisible picking
+  // plane per polygon edge. That per-edge-plane approach was also the
+  // dominant cause of the RAM blowup at large radii (~6-7 extra three.js
+  // objects per building) -- removing it fixes both at once. Bearing
+  // computation (outwardNormal/bearingFromNormal) is no longer used for
+  // rendering but stays available for analyze_view.py's --bearing flag users.
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.userData.isSceneContent = true;
+  mesh.userData = {
+    isSceneContent: true, isBuilding: true,
+    buildingName: p.name || p.addr || `osm:${p.osm_id}`,
+    heightKnown: isKnown, heightM: p.height_m,
+  };
   scene.add(mesh);
-
-  // Facade picking planes, one per polygon edge, invisible-ish until hovered.
-  const centroid = polygonCentroid(ring);
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i], b = ring[(i + 1) % ring.length];
-    const edgeLen = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (edgeLen < 1) continue;
-    const [nx, ny] = outwardNormal(a, b, centroid);
-    const bearing = bearingFromNormal(nx, ny);
-    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-
-    const planeGeo = new THREE.PlaneGeometry(edgeLen, height);
-    const planeMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.0, side: THREE.DoubleSide, depthWrite: false,
-    });
-    const plane = new THREE.Mesh(planeGeo, planeMat);
-    const off = 0.25; // push slightly outward off the wall to avoid z-fighting
-    const worldPos = dataToWorld(mid[0] + nx * off, mid[1] + ny * off, height / 2);
-    plane.position.copy(worldPos);
-    const angle = Math.atan2(b[0] - a[0], -(b[1] - a[1]));
-    plane.rotation.y = angle;
-    plane.userData = {
-      isSceneContent: true, isFacade: true, bearing,
-      buildingName: p.name || p.addr || `osm:${p.osm_id}`,
-      heightKnown: isKnown, heightM: p.height_m,
-    };
-    scene.add(plane);
-    facadeGroup.push(plane);
-  }
+  buildingGroup.push(mesh);
 }
 
 function buildSubjectMarker(floor, metersPerStorey) {
@@ -225,13 +186,13 @@ function drawViewReport(report) {
 }
 
 function unhighlight(obj) {
-  if (obj.userData.isFacade) obj.material.opacity = 0.0;
+  if (obj.userData.isBuilding) obj.material.emissive && obj.material.emissive.setHex(0x000000);
   else if (obj.userData.isRay) obj.material.opacity = 0.7;
   else if (obj.userData.isTransit) obj.scale.set(1, 1, 1);
 }
 
 function highlight(obj) {
-  if (obj.userData.isFacade) obj.material.opacity = 0.35;
+  if (obj.userData.isBuilding) obj.material.emissive && obj.material.emissive.setHex(0x2a2a10);
   else if (obj.userData.isRay) obj.material.opacity = 1.0;
   else if (obj.userData.isTransit) obj.scale.set(1.6, 1.6, 1.6);
 }
@@ -240,7 +201,7 @@ function onMouseMove(e) {
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects([...facadeGroup, ...rayGroup, ...transitGroup]);
+  const hits = raycaster.intersectObjects([...buildingGroup, ...rayGroup, ...transitGroup]);
   if (hovered && (!hits.length || hits[0].object !== hovered)) {
     unhighlight(hovered);
     hovered = null;
@@ -256,13 +217,11 @@ function onClick() {
   const info = document.getElementById('info');
   info.style.display = 'block';
 
-  if (hovered.userData.isFacade) {
+  if (hovered.userData.isBuilding) {
     const d = hovered.userData;
     info.innerHTML = `
       <b>${d.buildingName}</b><br>
-      Facade bearing: <b>${d.bearing.toFixed(0)}&deg;</b> (${bearingCompass(d.bearing)})<br>
-      Height: ${d.heightKnown ? d.heightM.toFixed(0) + 'm' : 'unknown -- add to manual_heights.json'}<br>
-      <span style="color:#8b96ad">Run: python analyze_view.py cache/&lt;file&gt;.geojson --floor N --bearing ${d.bearing.toFixed(0)}</span>
+      Height: ${d.heightKnown ? d.heightM.toFixed(0) + 'm' : 'unknown -- add to manual_heights.json'}
     `;
   } else if (hovered.userData.isRay) {
     const d = hovered.userData.report;
@@ -287,11 +246,6 @@ function onClick() {
     }[d.category] || d.category;
     info.innerHTML = `<b>${d.name || label}</b><br>${label}`;
   }
-}
-
-function bearingCompass(b) {
-  const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
-  return dirs[Math.round(b / 22.5) % 16];
 }
 
 async function loadScene(file, floor) {
