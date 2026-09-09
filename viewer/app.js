@@ -179,7 +179,19 @@ function drawViewReport(report) {
     const color = d.status === 'open' ? COLOR_OPEN : d.status === 'blocked' ? COLOR_BLOCKED : COLOR_UNCERTAIN;
     const dist = d.distance_m || report.radius_m;
     const rad = d.bearing * Math.PI / 180;
-    const x = Math.sin(rad) * dist, y = -Math.cos(rad) * dist; // data-space endpoint
+    // REAL BUG FIXED 2026-09-10: this had "y = -Math.cos(rad) * dist" (negated) while
+    // analyzeSightlinesJS uses "dy = Math.cos(rad)" (not negated) for the identical
+    // bearing convention -- every ray was rendered pointing in the mirror-image
+    // (north-south flipped) direction from what it was actually classified for. The
+    // classification/data was always correct (why repeated data-only verification
+    // checks kept coming back clean); only the visual draw direction was wrong.
+    // Confirmed via a real three.js Raycaster test against the actual rendered
+    // building meshes (not hand-written 2D math) -- e.g. a bearing-0 (north) ray
+    // classified "open" was hitting "50 Newton Road" etc., real buildings that sit
+    // to the SOUTH of the subject, at ~200-400m, well short of its claimed 500m
+    // open endpoint. Wesley caught this via repeated "the lines are going through
+    // buildings" reports that survived a hard cache refresh -- see LESSONS.md.
+    const x = Math.sin(rad) * dist, y = Math.cos(rad) * dist; // data-space endpoint
     const start = dataToWorld(0, 0, report.eye_height_m);
     const end = dataToWorld(x, y, report.eye_height_m);
     const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
