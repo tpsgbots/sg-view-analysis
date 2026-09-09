@@ -177,8 +177,16 @@ function drawViewReport(report) {
     const start = dataToWorld(0, 0, report.eye_height_m);
     const end = dataToWorld(x, y, report.eye_height_m);
     const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
-    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
+    // depthTest/depthWrite off + high renderOrder: these are diagnostic overlay
+    // data, not real light -- without this, standard z-buffer occlusion hides
+    // whatever segment of a ray happens to pass behind some UNRELATED nearby
+    // building from the current camera angle, making a correctly-classified
+    // ray look like it "cuts off in mid-air" for a reason that has nothing to
+    // do with the actual analysis. Confirmed 2026-09-10 (Wesley: "the lines
+    // are cut off at random parts").
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false });
     const line = new THREE.Line(geo, mat);
+    line.renderOrder = 999;
     line.userData = { isSceneContent: true, isRay: true, report: d, eyeHeightM: report.eye_height_m };
     scene.add(line);
     rayGroup.push(line);
@@ -255,7 +263,7 @@ async function loadScene(file, floor) {
 
   let data;
   try {
-    const res = await fetch(`../cache/${file}.geojson`);
+    const res = await fetch(`../cache/${file}.geojson`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`${res.status}`);
     data = await res.json();
   } catch (err) {
@@ -283,7 +291,7 @@ async function loadScene(file, floor) {
   buildSubjectMarker(floor, metersPerStorey);
 
   try {
-    const res = await fetch(`../cache/${file}_floor${floor}_view.json`);
+    const res = await fetch(`../cache/${file}_floor${floor}_view.json`, { cache: 'no-store' });
     if (res.ok) {
       const report = await res.json();
       drawViewReport(report);
@@ -317,7 +325,7 @@ let manualHeightsPromise = null;
 
 function loadIslandCache() {
   if (!islandCachePromise) {
-    islandCachePromise = fetch('../cache/sg_buildings_full.geojson').then(r => {
+    islandCachePromise = fetch('../cache/sg_buildings_full.geojson', { cache: 'no-store' }).then(r => {
       if (!r.ok) throw new Error(`island cache HTTP ${r.status}`);
       return r.json();
     });
@@ -333,8 +341,8 @@ function loadIslandCache() {
 function loadManualHeights() {
   if (!manualHeightsPromise) {
     manualHeightsPromise = Promise.all([
-      fetch('../cache/manual_heights.json').then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} })),
-      fetch('../cache/hdb_heights.json').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('../cache/manual_heights.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} })),
+      fetch('../cache/hdb_heights.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([manual, hdb]) => {
       manual.by_osm_id = manual.by_osm_id || {};
       manual.by_name = manual.by_name || {};
@@ -529,13 +537,32 @@ function cropAndReproject(islandData, lat, lon, radiusM, manual, metersPerStorey
     else if (p.levels) { heightM = p.levels * metersPerStorey; levels = p.levels; heightSource = 'osm_levels'; }
 
     const localRing = ring.map(([plon, plat]) => latlonToLocalXY(plat, plon, lat, lon));
+    const footprintArea = polygonCentroidArea(localRing).area;
     features.push({
       type: 'Feature',
-      properties: { osm_id: p.osm_id, name: p.name, building_type: p.building_type, levels, height_m: heightM, height_source: heightSource, addr: p.addr },
+      properties: { osm_id: p.osm_id, name: p.name, building_type: p.building_type, levels, height_m: heightM, height_source: heightSource, footprint_area_m2: footprintArea, addr: p.addr },
       geometry: { type: 'Polygon', coordinates: [localRing] },
     });
   }
   return { type: 'FeatureCollection', features: dedupeOverlappingFootprints(features) };
+}
+
+// Height-plausibility heuristic, added 2026-09-10 -- mirrors fetch_buildings.py's
+// plausible_max_height_m(), keep both in sync. See that file for the full
+// rationale comment; short version: a small-footprint unknown building is very
+// unlikely to be a highrise, so cap what it could plausibly be instead of
+// treating it as "could theoretically block a 100m+ view".
+const LOW_RISE_BUILDING_TYPES = new Set([
+  'house', 'detached', 'semidetached_house', 'terrace', 'bungalow',
+  'garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'ruins',
+]);
+
+function plausibleMaxHeightM(footprintAreaM2, buildingType, metersPerStorey = 3.0) {
+  if (LOW_RISE_BUILDING_TYPES.has(buildingType)) return 4 * metersPerStorey;
+  if (footprintAreaM2 == null) return null;
+  if (footprintAreaM2 < 250) return 5 * metersPerStorey;
+  if (footprintAreaM2 < 600) return 8 * metersPerStorey;
+  return null;
 }
 
 // ---- sightline analysis, ported from analyze_view.py (same math/thresholds) ----
@@ -581,6 +608,11 @@ function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHei
       if (h != null) {
         if (h > eyeHeight && (!confirmed || dist < confirmed.dist)) confirmed = { dist, f };
       } else {
+        // Height-plausibility heuristic (2026-09-10): see plausibleMaxHeightM() --
+        // rules out small-footprint unknowns that plausibly can't reach eye height,
+        // mirrors fetch_buildings.py/analyze_view.py's Python version exactly.
+        const plausibleMax = plausibleMaxHeightM(f.properties.footprint_area_m2, f.properties.building_type);
+        if (plausibleMax !== null && plausibleMax <= eyeHeight) continue;
         if (!uncertain || dist < uncertain.dist) uncertain = { dist, f };
       }
     }
@@ -666,7 +698,7 @@ let roadsCachePromise = null, waterCachePromise = null, transitCachePromise = nu
 let parksCachePromise = null, schoolsCachePromise = null;
 
 function loadLayerCache(promiseVar, filename) {
-  return fetch(`../cache/${filename}`).then(r => {
+  return fetch(`../cache/${filename}`, { cache: 'no-store' }).then(r => {
     if (!r.ok) throw new Error(`${filename} not built yet (${r.status})`);
     return r.json();
   });

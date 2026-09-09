@@ -1,6 +1,8 @@
 {
   "_readme": "Manual height overrides. Match by OSM id ('osm:12345') or by building name (case-insensitive, must match OSM's 'name' tag exactly-ish -- check the building's 'name' field in the output geojson if unsure). 'levels' x 'meters_per_storey' (default 3.0 if omitted) computes height_m, OR set 'height_m' directly to skip the multiplication entirely. Entries here always win over OSM's own building:levels tag.",
-  "by_osm_id": {},
+  "by_osm_id": {
+    "728243729": {"levels": 8, "_note": "Marina Bay Financial Centre retail podium/site outline (24,146m^2 footprint, generic building=yes tag, no height) -- sourced 2026-09-10 via Powen Group (contractor on the project): 6 levels of carparks + 2-storey retail plaza. Was staying 'uncertain' forever regardless of floor since the plausibility heuristic only caps SMALL footprints, not large-but-genuinely-low-rise ones like this podium."}
+  },
   "by_name": {
     "UOB Plaza Tower 1": {"levels": 66},
     "UOB Plaza Tower 2": {"levels": 38},

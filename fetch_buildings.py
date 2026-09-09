@@ -259,6 +259,7 @@ def build_geojson(elements: list, origin_lat: float, origin_lon: float, manual: 
         else:
             height_m, out_levels, source = None, None, None
 
+        _, _, footprint_area = polygon_centroid_area(ring)
         features.append({
             "type": "Feature",
             "properties": {
@@ -268,6 +269,7 @@ def build_geojson(elements: list, origin_lat: float, origin_lon: float, manual: 
                 "levels": out_levels,
                 "height_m": height_m,
                 "height_source": source,
+                "footprint_area_m2": round(footprint_area, 1),
                 "addr": " ".join(
                     filter(None, [tags.get("addr:housenumber"), tags.get("addr:street")])
                 ) or None,
@@ -290,6 +292,40 @@ def polygon_centroid_area(ring):
     area = abs(area / 2)
     denom = 6 * area or 1
     return cx / denom, cy / denom, area
+
+
+# Height-plausibility heuristic, added 2026-09-10 (Wesley: "height plausibility
+# please" -- chosen over a purely-visual fix). A random SMALL-footprint building
+# with no height data is extremely unlikely to be a highrise (landed housing,
+# shophouses, small retail/kiosks) -- for those, cap the plausible max height
+# and stop treating them as "could theoretically block a 100m+ view" the same
+# way a genuinely unknown LARGE building (could be anything, stays honestly
+# uncertain) is treated. Confirmed need: Revenue House floor 35 (eye height
+# 103.5m) showed 63/72 directions "uncertain" purely because of small nearby
+# buildings with no height tag, even though a person who actually works there
+# confirmed the real view is "VERY VERY unblocked". This does NOT invent a
+# specific height for these buildings -- it only says "definitely too short to
+# matter at THIS eye height", so it can rule a building out of the way without
+# ever asserting what its real height actually is.
+LOW_RISE_BUILDING_TYPES = {
+    "house", "detached", "semidetached_house", "terrace", "bungalow",
+    "garage", "garages", "shed", "hut", "carport", "roof", "ruins",
+}
+
+
+def plausible_max_height_m(footprint_area_m2, building_type, meters_per_storey=3.0):
+    """Conservative upper bound on how tall an unknown-height building could
+    plausibly be, from footprint area + building type alone. Returns None if
+    the footprint is too large to say anything confident (stays uncertain)."""
+    if building_type in LOW_RISE_BUILDING_TYPES:
+        return 4 * meters_per_storey  # ~12m -- generous cap for landed housing
+    if footprint_area_m2 is None:
+        return None
+    if footprint_area_m2 < 250:
+        return 5 * meters_per_storey  # ~15m -- shophouse / small-structure scale
+    if footprint_area_m2 < 600:
+        return 8 * meters_per_storey  # ~24m -- larger shophouse rows / mid conservation blocks
+    return None  # large footprint could genuinely be anything -- stay honest
 
 
 def dedupe_overlapping_footprints(features: list) -> list:

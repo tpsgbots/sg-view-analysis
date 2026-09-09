@@ -28,6 +28,8 @@ import json
 import math
 from pathlib import Path
 
+from fetch_buildings import plausible_max_height_m
+
 HERE = Path(__file__).parent
 DEFAULT_METERS_PER_STOREY = 3.0
 DEFAULT_EYE_HEIGHT_ABOVE_FLOOR = 1.5
@@ -132,6 +134,16 @@ def analyze(geojson_path: Path, floor: int, meters_per_storey: float, eye_height
                     if confirmed_blocker is None or dist < confirmed_blocker[0]:
                         confirmed_blocker = (dist, f)
             else:
+                # Height-plausibility heuristic (2026-09-10): a small-footprint
+                # unknown building is very unlikely to reach a high eye height --
+                # if its plausible max is still below eye level, it can't be a
+                # real blocker, so skip it entirely rather than flag "uncertain".
+                # Large-footprint unknowns (plausible_max is None) stay uncertain
+                # as before -- this never asserts a specific real height, only
+                # rules a building out when it plausibly CAN'T reach eye level.
+                plausible_max = plausible_max_height_m(p.get("footprint_area_m2"), p.get("building_type"))
+                if plausible_max is not None and plausible_max <= eye_height:
+                    continue
                 if uncertain_blocker is None or dist < uncertain_blocker[0]:
                     uncertain_blocker = (dist, f)
 
