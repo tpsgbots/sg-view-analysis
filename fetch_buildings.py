@@ -135,10 +135,27 @@ def crop_island_cache(island_path: Path, lat: float, lon: float, radius_m: float
 
 
 def load_manual_heights() -> dict:
+    """Override chain, highest priority first: hand-typed manual_heights.json
+    entries, then hdb_heights.json (official HDB per-block floor data, built
+    by build_hdb_heights.py -- not present until that script has been run).
+    Merged here so callers only deal with one lookup; each entry keeps its
+    own 'source' so resolve_manual_height() reports the real origin."""
     path = CACHE_DIR / "manual_heights.json"
-    if not path.exists():
-        return {"by_osm_id": {}, "by_name": {}}
-    return json.loads(path.read_text(encoding="utf-8"))
+    manual = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"by_osm_id": {}, "by_name": {}}
+    manual.setdefault("by_osm_id", {})
+    manual.setdefault("by_name", {})
+    for entry in manual["by_osm_id"].values():
+        entry.setdefault("_source", "manual")
+    for entry in manual["by_name"].values():
+        entry.setdefault("_source", "manual")
+
+    hdb_path = CACHE_DIR / "hdb_heights.json"
+    if hdb_path.exists():
+        hdb = json.loads(hdb_path.read_text(encoding="utf-8"))
+        for osm_id, entry in hdb.get("by_osm_id", {}).items():
+            if osm_id not in manual["by_osm_id"]:  # manual always wins if both exist
+                manual["by_osm_id"][osm_id] = {**entry, "_source": "hdb_official"}
+    return manual
 
 
 def resolve_manual_height(manual: dict, osm_id, name, default_mps: float):
@@ -150,11 +167,12 @@ def resolve_manual_height(manual: dict, osm_id, name, default_mps: float):
         entry = manual["by_name"][key]
     if not entry:
         return None
+    source = entry.get("_source", "manual")
     if "height_m" in entry:
-        return {"height_m": entry["height_m"], "levels": entry.get("levels"), "height_source": "manual"}
+        return {"height_m": entry["height_m"], "levels": entry.get("levels"), "height_source": source}
     if "levels" in entry:
         mps = entry.get("meters_per_storey", default_mps)
-        return {"height_m": entry["levels"] * mps, "levels": entry["levels"], "height_source": "manual"}
+        return {"height_m": entry["levels"] * mps, "levels": entry["levels"], "height_source": source}
     return None
 
 

@@ -281,7 +281,10 @@ function onClick() {
     info.innerHTML = html;
   } else if (hovered.userData.isTransit) {
     const d = hovered.userData;
-    const label = { mrt_station: 'MRT Station', mrt_entrance: 'MRT Entrance', bus_stop: 'Bus Stop', bus_interchange: 'Bus Interchange' }[d.category] || d.category;
+    const label = {
+      mrt_station: 'MRT Station', mrt_entrance: 'MRT Entrance', bus_stop: 'Bus Stop', bus_interchange: 'Bus Interchange',
+      school: 'School', university: 'University', college: 'College', kindergarten: 'Kindergarten',
+    }[d.category] || d.category;
     info.innerHTML = `<b>${d.name || label}</b><br>${label}`;
   }
 }
@@ -368,9 +371,28 @@ function loadIslandCache() {
   return islandCachePromise;
 }
 
+// Override chain, highest priority first: hand-typed manual_heights.json,
+// then hdb_heights.json (official HDB per-block floor data, built by
+// build_hdb_heights.py -- may not exist yet). Merged so callers only deal
+// with one lookup; each entry keeps its own _source for correct labeling.
+// Mirrors fetch_buildings.py's load_manual_heights() -- keep both in sync.
 function loadManualHeights() {
   if (!manualHeightsPromise) {
-    manualHeightsPromise = fetch('../cache/manual_heights.json').then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} }));
+    manualHeightsPromise = Promise.all([
+      fetch('../cache/manual_heights.json').then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} })),
+      fetch('../cache/hdb_heights.json').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([manual, hdb]) => {
+      manual.by_osm_id = manual.by_osm_id || {};
+      manual.by_name = manual.by_name || {};
+      for (const entry of Object.values(manual.by_osm_id)) entry._source = entry._source || 'manual';
+      for (const entry of Object.values(manual.by_name)) entry._source = entry._source || 'manual';
+      if (hdb) {
+        for (const [osmId, entry] of Object.entries(hdb.by_osm_id || {})) {
+          if (!(osmId in manual.by_osm_id)) manual.by_osm_id[osmId] = { ...entry, _source: 'hdb_official' };
+        }
+      }
+      return manual;
+    });
   }
   return manualHeightsPromise;
 }
@@ -445,12 +467,57 @@ function resolveManualHeight(manual, osmId, name, defaultMps) {
     if (key) entry = manual.by_name[key];
   }
   if (!entry) return null;
-  if ('height_m' in entry) return { height_m: entry.height_m, levels: entry.levels ?? null, height_source: 'manual' };
+  const source = entry._source || 'manual';
+  if ('height_m' in entry) return { height_m: entry.height_m, levels: entry.levels ?? null, height_source: source };
   if ('levels' in entry) {
     const mps = entry.meters_per_storey ?? defaultMps;
-    return { height_m: entry.levels * mps, levels: entry.levels, height_source: 'manual' };
+    return { height_m: entry.levels * mps, levels: entry.levels, height_source: source };
   }
   return null;
+}
+
+// Real-world-ish lane widths and a lighter/brighter surface for bigger
+// roads, closer to how a real map renders a road hierarchy instead of a
+// uniform 1px wireframe line (that's what this replaced -- confirmed with
+// Wesley 2026-09-10 that it read as unconvincing).
+const ROAD_WIDTH_M = {
+  motorway: 22, trunk: 18, primary: 15, secondary: 12,
+  tertiary: 9, residential: 6, unclassified: 6, service: 3.5, living_street: 5,
+};
+const ROAD_COLOR = {
+  motorway: 0xd7dbe3, trunk: 0xc9ced8, primary: 0xb8bfcc,
+  secondary: 0xa6adba, tertiary: 0x969daa, residential: 0x7d8494,
+  unclassified: 0x7d8494, service: 0x656c7a, living_street: 0x7d8494,
+};
+
+// Builds a flat ribbon (2 triangles per segment) along a road centerline,
+// width/color keyed by OSM highway class. Segments aren't mitered at joints
+// (small gaps/overlaps at sharp turns) -- an accepted simplification, real
+// map renderers mostly do the same rather than computing proper joint caps.
+function buildRoadRibbon(localPts, highwayClass) {
+  if (localPts.length < 2) return null;
+  const width = ROAD_WIDTH_M[highwayClass] || 5;
+  const color = ROAD_COLOR[highwayClass] || 0x7d8494;
+  const positions = [];
+  for (let i = 0; i < localPts.length - 1; i++) {
+    const [x1, y1] = localPts[i], [x2, y2] = localPts[i + 1];
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -(dy / len) * (width / 2), ny = (dx / len) * (width / 2);
+    // two triangles forming the segment's rectangle, in world space directly
+    const a = dataToWorld(x1 + nx, y1 + ny, 0.12);
+    const b = dataToWorld(x2 + nx, y2 + ny, 0.12);
+    const c = dataToWorld(x2 - nx, y2 - ny, 0.12);
+    const d = dataToWorld(x1 - nx, y1 - ny, 0.12);
+    positions.push(
+      a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z,
+      a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z,
+    );
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+  return new THREE.Mesh(geo, mat);
 }
 
 // Shoelace-formula centroid + area, in local XY meters.
@@ -503,14 +570,14 @@ function cropAndReproject(islandData, lat, lon, radiusM, manual, metersPerStorey
 
     const p = feat.properties;
     const override = resolveManualHeight(manual, p.osm_id, p.name, metersPerStorey);
-    let heightM = null, levels = null;
-    if (override) { heightM = override.height_m; levels = override.levels; }
-    else if (p.levels) { heightM = p.levels * metersPerStorey; levels = p.levels; }
+    let heightM = null, levels = null, heightSource = null;
+    if (override) { heightM = override.height_m; levels = override.levels; heightSource = override.height_source; }
+    else if (p.levels) { heightM = p.levels * metersPerStorey; levels = p.levels; heightSource = 'osm_levels'; }
 
     const localRing = ring.map(([plon, plat]) => latlonToLocalXY(plat, plon, lat, lon));
     features.push({
       type: 'Feature',
-      properties: { osm_id: p.osm_id, name: p.name, building_type: p.building_type, levels, height_m: heightM, addr: p.addr },
+      properties: { osm_id: p.osm_id, name: p.name, building_type: p.building_type, levels, height_m: heightM, height_source: heightSource, addr: p.addr },
       geometry: { type: 'Polygon', coordinates: [localRing] },
     });
   }
@@ -642,6 +709,7 @@ async function goToAddress(address, floor, radiusM) {
 // layer whose cache file doesn't exist yet is silently skipped (optional).
 
 let roadsCachePromise = null, waterCachePromise = null, transitCachePromise = null;
+let parksCachePromise = null, schoolsCachePromise = null;
 
 function loadLayerCache(promiseVar, filename) {
   return fetch(`../cache/${filename}`).then(r => {
@@ -654,8 +722,12 @@ async function loadContextLayers(lat, lon, radiusM) {
   if (!roadsCachePromise) roadsCachePromise = loadLayerCache(null, 'sg_roads_full.geojson').catch(() => null);
   if (!waterCachePromise) waterCachePromise = loadLayerCache(null, 'sg_water_full.geojson').catch(() => null);
   if (!transitCachePromise) transitCachePromise = loadLayerCache(null, 'sg_transit_full.geojson').catch(() => null);
+  if (!parksCachePromise) parksCachePromise = loadLayerCache(null, 'sg_parks_full.geojson').catch(() => null);
+  if (!schoolsCachePromise) schoolsCachePromise = loadLayerCache(null, 'sg_schools_full.geojson').catch(() => null);
 
-  const [roads, water, transit] = await Promise.all([roadsCachePromise, waterCachePromise, transitCachePromise]);
+  const [roads, water, transit, parks, schools] = await Promise.all([
+    roadsCachePromise, waterCachePromise, transitCachePromise, parksCachePromise, schoolsCachePromise,
+  ]);
 
   if (roads) {
     for (const f of roads.features) {
@@ -663,15 +735,9 @@ async function loadContextLayers(lat, lon, radiusM) {
       const clat = ring.reduce((s, p) => s + p[1], 0) / ring.length;
       const clon = ring.reduce((s, p) => s + p[0], 0) / ring.length;
       if (haversineM(lat, lon, clat, clon) > radiusM + 100) continue;
-      const pts = ring.map(([plon, plat]) => {
-        const [x, y] = latlonToLocalXY(plat, plon, lat, lon);
-        return dataToWorld(x, y, 0.15);
-      });
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      const mat = new THREE.LineBasicMaterial({ color: 0x8a93a8, transparent: true, opacity: 0.6 });
-      const line = new THREE.Line(geo, mat);
-      line.userData.isSceneContent = true;
-      scene.add(line);
+      const localPts = ring.map(([plon, plat]) => latlonToLocalXY(plat, plon, lat, lon));
+      const mesh = buildRoadRibbon(localPts, f.properties.highway);
+      if (mesh) { mesh.userData.isSceneContent = true; scene.add(mesh); }
     }
   }
 
@@ -711,6 +777,41 @@ async function loadContextLayers(lat, lon, radiusM) {
       const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: markerColor[cat] || 0xffffff }));
       mesh.position.copy(dataToWorld(x, y, (markerSize[cat] || 1.5) + 1));
       mesh.userData = { isSceneContent: true, isTransit: true, name: f.properties.name, category: cat };
+      scene.add(mesh);
+      transitGroup.push(mesh);
+    }
+  }
+
+  if (parks) {
+    for (const f of parks.features) {
+      const ring = f.geometry.coordinates[0];
+      const clat = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+      const clon = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+      if (haversineM(lat, lon, clat, clon) > radiusM + 100) continue;
+      const localRing = ring.map(([plon, plat]) => latlonToLocalXY(plat, plon, lat, lon));
+      const shape = new THREE.Shape();
+      localRing.forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)));
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0x2f7d4a, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false,
+      }));
+      mesh.position.y = 0.04;
+      mesh.userData.isSceneContent = true;
+      scene.add(mesh);
+    }
+  }
+
+  if (schools) {
+    const schoolColor = 0xe89b3c;
+    for (const f of schools.features) {
+      const [plon, plat] = f.geometry.coordinates;
+      if (haversineM(lat, lon, plat, plon) > radiusM + 50) continue;
+      const [x, y] = latlonToLocalXY(plat, plon, lat, lon);
+      const geo = new THREE.ConeGeometry(2.2, 4, 4);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: schoolColor }));
+      mesh.position.copy(dataToWorld(x, y, 3));
+      mesh.userData = { isSceneContent: true, isTransit: true, name: f.properties.name, category: f.properties.category };
       scene.add(mesh);
       transitGroup.push(mesh);
     }

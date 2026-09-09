@@ -15,6 +15,16 @@ python build_island_cache.py
 # optional: same for roads/water/MRT/bus stops context layers
 python build_island_layers.py
 
+# optional: parks + schools/institutions + malls + expressway ramps (run
+# after build_island_layers.py finishes, not at the same time -- see file
+# header comment for why)
+python build_island_parks_schools.py
+
+# optional but recommended: official HDB per-block floor data, corrects/fills
+# gaps in OSM's own height tag for HDB blocks specifically (run any time
+# after build_island_cache.py -- doesn't touch Overpass at all)
+python build_hdb_heights.py
+
 # serve the viewer
 python -m http.server 8123 --directory .
 # open http://localhost:8123/viewer/index.html
@@ -56,6 +66,19 @@ assumes **flat terrain** across the search area (fine for Singapore).
   built-up areas (~50-60% of buildings near a typical address) but far from
   complete — buildings without the tag show as "unknown height" and can only
   be resolved by adding them to `cache/manual_heights.json`.
+  - **Exception: HDB blocks.** `build_hdb_heights.py` joins HDB's own official
+    "HDB Property Information" dataset (data.gov.sg, real per-block floor
+    count, not zoning speculation) against the building cache by address.
+    Run it after `build_island_cache.py` — confirmed 2026-09-10: 10,994
+    building matches, 2,807 filled a real gap, 675 actually *corrected* a
+    disagreeing OSM tag. Writes `cache/hdb_heights.json`, which sits in the
+    override chain between `manual_heights.json` (always wins) and OSM's own
+    tag (last resort) — see `load_manual_heights()` in `fetch_buildings.py`
+    / `loadManualHeights()` in `viewer/app.js`. Address matching is a
+    best-effort text join (street abbreviations normalized both ways), not
+    guaranteed 100% — check `height_source` on a building
+    (`"hdb_official"` vs `"osm_levels"` vs `"manual"`) if you need to know
+    which source a given height came from.
 - **OSM has a lot of near-duplicate/overlapping building footprints** for the
   same real building (492 found in one 500m-radius test crop). Both
   `fetch_buildings.py` and the viewer's client-side crop dedupe these
@@ -87,6 +110,13 @@ build_island_cache.py      One-time: tile the whole island into a grid of
 build_island_layers.py     One-time: same tiling approach for roads, MRT/bus
                           points, and water bodies -> cache/sg_roads_full.geojson,
                           sg_transit_full.geojson, sg_water_full.geojson
+build_island_parks_schools.py  One-time: same again for parks and educational
+                          institutions -> cache/sg_parks_full.geojson,
+                          sg_schools_full.geojson. Separate script/tile cache
+                          from build_island_layers.py on purpose — added after
+                          that build was already mostly done, and running two
+                          heavy tiled Overpass fetches at once just compounds
+                          the rate-limiting both already have to fight.
 viewer/index.html + app.js  The actual tool. three.js scene, live client-side
                           geocode + crop + sightline analysis (ports the same
                           logic as analyze_view.py — keep both in sync if you
