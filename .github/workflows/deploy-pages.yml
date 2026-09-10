@@ -1,0 +1,42 @@
+# Publishes viewer/ (the static three.js app) to GitHub Pages on every push
+# to main. Only viewer/ is published -- NOT cache/ (541MB, gitignored
+# anyway, regeneratable) and not the repo's Python/CLI scripts, which have
+# no reason to be publicly served. The viewer fetches its data from a
+# separate Cloudflare R2 Worker in production (see viewer/app.js's
+# cacheUrl()), not from this repo -- see r2/ for that setup.
+#
+# One-time setup (can't be done from here -- needs your GitHub login):
+#   Settings -> Pages -> Source -> "GitHub Actions"
+# After that, every push to main auto-deploys.
+
+name: Deploy viewer to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["viewer/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: viewer
+      - id: deployment
+        uses: actions/deploy-pages@v4
