@@ -66,6 +66,9 @@ def main():
     ap.add_argument("--eye-height-above-floor", type=float, default=DEFAULT_EYE_HEIGHT_ABOVE_FLOOR)
     ap.add_argument("--radius", type=float, default=None)
     ap.add_argument("--ray-step", type=int, default=5, help="Degree step between rays within analyze() (default 5)")
+    ap.add_argument("--max-obstruction-distance", type=float, default=None,
+                     help="Ignore buildings beyond this distance as obstructions -- 'background noise' "
+                          "you can see around, even if technically taller than eye height (default: no cutoff)")
     args = ap.parse_args()
 
     geojson_path = Path(args.geojson)
@@ -87,7 +90,7 @@ def main():
     rows = []
     for floor in range(args.min_floor, max_floor + 1, args.step):
         report = analyze(geojson_path, floor, args.meters_per_storey, args.eye_height_above_floor,
-                          radius, None, None, args.ray_step)
+                          radius, None, None, args.ray_step, args.max_obstruction_distance)
         sides = side_breakdown(report["directions"])
         row = {"floor": floor, "eye_height_m": report["eye_height_m"]}
         for side, stats in sides.items():

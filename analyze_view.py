@@ -101,7 +101,7 @@ def bearing_label(b):
 
 
 def analyze(geojson_path: Path, floor: int, meters_per_storey: float, eye_height_above_floor: float,
-            radius_m: float, bearing_center=None, arc_deg=None, step_deg=5):
+            radius_m: float, bearing_center=None, arc_deg=None, step_deg=5, max_obstruction_dist=None):
     data = json.loads(geojson_path.read_text(encoding="utf-8"))
     features = data["features"]
     subject_id = find_subject_building(features)
@@ -127,6 +127,13 @@ def analyze(geojson_path: Path, floor: int, meters_per_storey: float, eye_height
             ring = f["geometry"]["coordinates"][0]
             dist = ray_polygon_min_distance(0, 0, dx, dy, ring)
             if dist is None or dist > radius_m or dist < 3:  # 3m: ignore near-self noise
+                continue
+            # "Background noise" cutoff: a building far enough away no longer reads as
+            # blocking the view (you can see around/past it) even if it's technically
+            # taller than eye height -- skip it as an obstruction candidate entirely,
+            # same as if it weren't there. Doesn't shrink the search radius itself,
+            # only which buildings within it still count as real blockers.
+            if max_obstruction_dist is not None and dist > max_obstruction_dist:
                 continue
             height = p.get("height_m")
             if height is not None:
@@ -232,6 +239,9 @@ def main():
     ap.add_argument("--bearing", type=float, default=None, help="Center facing direction in degrees (0=N, 90=E) -- omit to check full 360")
     ap.add_argument("--arc", type=float, default=90, help="Arc width in degrees around --bearing (default 90)")
     ap.add_argument("--step", type=int, default=5, help="Degree step between rays (default 5)")
+    ap.add_argument("--max-obstruction-distance", type=float, default=None,
+                     help="Ignore buildings beyond this distance as obstructions -- 'background noise' "
+                          "you can see around, even if technically taller than eye height (default: no cutoff)")
     args = ap.parse_args()
 
     geojson_path = Path(args.geojson)
@@ -241,6 +251,7 @@ def main():
     report = analyze(
         geojson_path, args.floor, args.meters_per_storey, args.eye_height_above_floor,
         radius, args.bearing, args.arc if args.bearing is not None else None, args.step,
+        args.max_obstruction_distance,
     )
 
     print(summarize(report))

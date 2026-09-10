@@ -633,7 +633,7 @@ function bearingLabelJS(b) {
   return dirs[Math.round(b / 22.5) % 16];
 }
 
-function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHeightAboveFloor, radiusM, step) {
+function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHeightAboveFloor, radiusM, step, maxObstructionDist) {
   const eyeHeight = (floor - 1) * metersPerStorey + eyeHeightAboveFloor;
   const directions = [];
   for (let b = 0; b < 360; b += step) {
@@ -643,6 +643,10 @@ function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHei
       if (f.properties.osm_id === subjectId) continue;
       const dist = rayPolygonMinDistanceJS(0, 0, dx, dy, f.geometry.coordinates[0]);
       if (dist === null || dist > radiusM || dist < 3) continue;
+      // "Background noise" cutoff (mirrors analyze_view.py's Python version exactly) --
+      // a building far enough away no longer reads as blocking the view even if it's
+      // technically taller than eye height; skip it as an obstruction candidate entirely.
+      if (maxObstructionDist != null && dist > maxObstructionDist) continue;
       const h = f.properties.height_m;
       if (h != null) {
         if (h > eyeHeight && (!confirmed || dist < confirmed.dist)) confirmed = { dist, f };
@@ -677,6 +681,18 @@ function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHei
     }
   }
   return { floor, eye_height_m: eyeHeight, meters_per_storey: metersPerStorey, radius_m: radiusM, directions };
+}
+
+// "Background noise" cutoff toggle: when checked, a building beyond the
+// distance typed in #max-obstruction-input no longer counts as blocking the
+// view (see analyzeSightlinesJS's maxObstructionDist param) -- it's still
+// rendered, just excluded as an obstruction candidate. Returns null (no
+// cutoff, matches the old always-on behavior) when the toggle is off.
+function getMaxObstructionDistFromUI() {
+  const enabled = document.getElementById('max-obstruction-toggle')?.checked;
+  if (!enabled) return null;
+  const val = parseFloat(document.getElementById('max-obstruction-input')?.value);
+  return Number.isFinite(val) && val > 0 ? val : null;
 }
 
 async function goToAddress(address, floor, radiusM) {
@@ -722,7 +738,8 @@ async function goToAddress(address, floor, radiusM) {
   for (const f of data.features) buildBuilding(f, f.properties.osm_id === subjectId, subjectMinHeight);
   buildSubjectMarker(floor, metersPerStorey);
 
-  const report = analyzeSightlinesJS(data.features, subjectId, floor, metersPerStorey, 1.5, radiusM, 5);
+  const maxObstructionDist = getMaxObstructionDistFromUI();
+  const report = analyzeSightlinesJS(data.features, subjectId, floor, metersPerStorey, 1.5, radiusM, 5, maxObstructionDist);
   drawViewReport(report);
 
   const blocked = report.directions.filter(d => d.status === 'blocked').length;
