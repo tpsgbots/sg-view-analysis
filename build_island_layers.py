@@ -102,7 +102,14 @@ def fetch_tile(south, west, north, east, tile_path: Path):
         f'way["highway"~"^({ROAD_CLASSES})$"]({south},{west},{north},{east});'
         f'way["natural"="water"]({south},{west},{north},{east});'
         f'way["water"]({south},{west},{north},{east});'
+        # node + way both needed: major interchanges (e.g. Raffles Place) are
+        # tagged railway=station on a WAY (real platform footprint), not a
+        # node -- node-only missed them entirely. Confirmed 2026-09-10 via
+        # poi_distances.py reporting Raffles Place's nearest MRT station as
+        # Kallang, 3.76km away, despite an MRT entrance 24m away at the same
+        # address. See LESSONS.md.
         f'node["railway"="station"]({south},{west},{north},{east});'
+        f'way["railway"="station"]({south},{west},{north},{east});'
         f'node["railway"="subway_entrance"]({south},{west},{north},{east});'
         f'node["highway"="bus_stop"]({south},{west},{north},{east});'
         f'node["amenity"="bus_station"]({south},{west},{north},{east});'
