@@ -1,5 +1,6 @@
 # Secrets -- never commit
 .env
+r2/set_credentials.ps1
 
 # Generated/fetched data -- large, regeneratable via the fetch/build scripts.
 # manual_heights.json is the one hand-edited exception, keep it tracked.
