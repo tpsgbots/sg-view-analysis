@@ -90,6 +90,16 @@ function setCameraForRadius(radiusM) {
   camera.updateProjectionMatrix();
 }
 
+// Ray click-picking uses a fixed WORLD-space threshold (see init3D), so the
+// same tolerance subtends a much smaller on-screen target for a long ray far
+// from camera than a short one close by -- open rays reach all the way to
+// radiusM while blocked/uncertain rays usually stop much closer, so open
+// rays were effectively unclickable at default radii. Scale the threshold
+// with radius so pick tolerance stays proportional to how far rays reach.
+function setRayPickThreshold(radiusM) {
+  raycaster.params.Line.threshold = Math.max(2.5, radiusM * 0.015);
+}
+
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -303,6 +313,7 @@ async function loadScene(file, floor) {
   document.getElementById('address-line').textContent = subj.address || file;
   setFogRange(subj.radius_m || 500);
   setCameraForRadius(subj.radius_m || 500);
+  setRayPickThreshold(subj.radius_m || 500);
 
   // find subject building: whichever footprint contains the origin
   let subjectId = null;
@@ -701,6 +712,7 @@ async function goToAddress(address, floor, radiusM) {
   currentData = data;
   setFogRange(radiusM);
   setCameraForRadius(radiusM);
+  setRayPickThreshold(radiusM);
 
   let subjectId = null;
   for (const f of data.features) {
