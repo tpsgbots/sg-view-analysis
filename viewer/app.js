@@ -106,9 +106,35 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+// World north = (0,0,-1) -- see the axis-convention comment at the top of
+// this file (world Z = -data y/north). Computed by actually projecting a
+// world-space north point to screen space every frame via the camera's real
+// current view/projection matrices, rather than assuming a fixed "north is
+// up" relationship that only holds at the default camera angle -- this way
+// it stays correct through any orbit/pan/zoom, not just the initial view.
+const compassNeedle = document.getElementById('compass-needle');
+const northProbe = new THREE.Vector3();
+function updateCompass() {
+  if (!compassNeedle) return;
+  const origin = controls.target;
+  northProbe.set(origin.x, origin.y, origin.z - 50); // 50 world units north of the orbit target
+  const o = origin.clone().project(camera);
+  const n = northProbe.clone().project(camera);
+  const dx = (n.x - o.x) * window.innerWidth / 2;
+  const dy = -(n.y - o.y) * window.innerHeight / 2; // screen Y is flipped vs NDC Y
+  // CSS rotate(0) leaves the needle pointing up (its unrotated layout position),
+  // and rotate(theta) turns it clockwise -- so mapping a screen delta (dy positive
+  // = down) onto that requires atan2(dx, -dy), not atan2(dx, dy) (which pointed
+  // the needle 180deg off, confirmed against the scene's own real bearing-0/north
+  // ray before this fix -- see LESSONS.md).
+  const angleDeg = Math.atan2(dx, -dy) * 180 / Math.PI; // 0 = up, clockwise
+  compassNeedle.style.transform = `rotate(${angleDeg}deg)`;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  updateCompass();
   renderer.render(scene, camera);
 }
 
