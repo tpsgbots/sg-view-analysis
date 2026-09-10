@@ -300,7 +300,7 @@ async function loadScene(file, floor) {
 
   let data;
   try {
-    const res = await fetch(`../cache/${file}.geojson`, { cache: 'no-store' });
+    const res = await fetch(`../cache/${file}.geojson`, { cache: 'no-cache' });
     if (!res.ok) throw new Error(`${res.status}`);
     data = await res.json();
   } catch (err) {
@@ -330,7 +330,7 @@ async function loadScene(file, floor) {
   buildSubjectMarker(floor, metersPerStorey);
 
   try {
-    const res = await fetch(`../cache/${file}_floor${floor}_view.json`, { cache: 'no-store' });
+    const res = await fetch(`../cache/${file}_floor${floor}_view.json`, { cache: 'no-cache' });
     if (res.ok) {
       const report = await res.json();
       drawViewReport(report);
@@ -365,7 +365,7 @@ let manualHeightsPromise = null;
 
 function loadIslandCache() {
   if (!islandCachePromise) {
-    islandCachePromise = fetch('../cache/sg_buildings_full.geojson', { cache: 'no-store' }).then(r => {
+    islandCachePromise = fetch('../cache/sg_buildings_full.geojson', { cache: 'no-cache' }).then(r => {
       if (!r.ok) throw new Error(`island cache HTTP ${r.status}`);
       return r.json();
     });
@@ -381,8 +381,8 @@ function loadIslandCache() {
 function loadManualHeights() {
   if (!manualHeightsPromise) {
     manualHeightsPromise = Promise.all([
-      fetch('../cache/manual_heights.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} })),
-      fetch('../cache/hdb_heights.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('../cache/manual_heights.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : { by_osm_id: {}, by_name: {} }).catch(() => ({ by_osm_id: {}, by_name: {} })),
+      fetch('../cache/hdb_heights.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([manual, hdb]) => {
       manual.by_osm_id = manual.by_osm_id || {};
       manual.by_name = manual.by_name || {};
@@ -789,7 +789,7 @@ let roadsCachePromise = null, waterCachePromise = null, transitCachePromise = nu
 let parksCachePromise = null, schoolsCachePromise = null;
 
 function loadLayerCache(promiseVar, filename) {
-  return fetch(`../cache/${filename}`, { cache: 'no-store' }).then(r => {
+  return fetch(`../cache/${filename}`, { cache: 'no-cache' }).then(r => {
     if (!r.ok) throw new Error(`${filename} not built yet (${r.status})`);
     return r.json();
   });

@@ -20,10 +20,18 @@ HERE = Path(__file__).parent
 
 
 class NoCacheHandler(SimpleHTTPRequestHandler):
+    # "no-cache, must-revalidate" (NOT "no-store") -- forces the browser to always
+    # ask the server before trusting its cached copy (fixes the original silent-
+    # staleness bug), but still lets it reuse the cached body via a conditional GET
+    # when nothing changed. SimpleHTTPRequestHandler already answers If-Modified-Since
+    # with 304 Not Modified for an unchanged file, so an unchanged large data file
+    # (sg_buildings_full.geojson is ~89MB, not the ~30MB originally assumed) costs a
+    # tiny 304 round-trip instead of a full re-transfer on every single page load --
+    # "no-store" was correctness-safe but forced a full re-download every time
+    # regardless of whether anything actually changed, which is what made every
+    # load slow once it was applied to these big, rarely-changing data files too.
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
 
 
