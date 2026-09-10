@@ -32,6 +32,13 @@
   }
   #legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
   #status { position: absolute; bottom: 12px; right: 12px; z-index: 10; color: #6b7690; font-size: 11px; }
+  #side-breakdown {
+    position: absolute; top: 250px; right: 12px; z-index: 10;
+    background: rgba(15,20,30,0.85); color: #e8ecf4; padding: 10px 14px;
+    border-radius: 8px; font-size: 12px; width: 220px;
+  }
+  #side-breakdown table { width: 100%; }
+  #side-breakdown td, #side-breakdown th { padding: 2px 4px; text-align: center; }
 </style>
 </head>
 <body>
@@ -73,9 +80,10 @@
 </div>
 
 <div id="status"></div>
+<div id="side-breakdown"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

@@ -180,7 +180,11 @@ def analyze(geojson_path: Path, floor: int, meters_per_storey: float, eye_height
                 "note": "closest obstruction has no known height -- supply it via cache/manual_heights.json to resolve",
             })
         else:
-            results.append({"bearing": b, "compass": bearing_label(b), "status": "open", "distance_m": None, "blocker": None})
+            # "Open" means nothing blocks it within radius_m -- impute radius_m itself as
+            # distance_m (a floor, not a measured distance: the true clear distance could be
+            # further, we just didn't search past this radius) instead of None, so every
+            # sightline has a usable distance-before-blocked number for downstream reports.
+            results.append({"bearing": b, "compass": bearing_label(b), "status": "open", "distance_m": round(radius_m, 1), "blocker": None})
 
     return {
         "subject": data.get("subject"),

@@ -323,6 +323,7 @@ async function loadScene(file, floor) {
     if (res.ok) {
       const report = await res.json();
       drawViewReport(report);
+      renderSideBreakdown(report);
       status.textContent = `${data.features.length} buildings | view report loaded (floor ${floor})`;
     } else {
       status.textContent = `${data.features.length} buildings | no view report yet for floor ${floor} (run analyze_view.py)`;
@@ -659,7 +660,9 @@ function analyzeSightlinesJS(features, subjectId, floor, metersPerStorey, eyeHei
       directions.push({ bearing: b, compass: bearingLabelJS(b), status: 'uncertain', distance_m: uncertain.dist,
         blocker: { name: p.name || p.addr || `osm:${p.osm_id}`, height_m: null, osm_id: p.osm_id } });
     } else {
-      directions.push({ bearing: b, compass: bearingLabelJS(b), status: 'open', distance_m: null, blocker: null });
+      // Open -- impute radiusM as distance_m (a floor, not a measured distance) instead of
+      // null, so every sightline reports a usable distance-before-blocked number.
+      directions.push({ bearing: b, compass: bearingLabelJS(b), status: 'open', distance_m: radiusM, blocker: null });
     }
   }
   return { floor, eye_height_m: eyeHeight, meters_per_storey: metersPerStorey, radius_m: radiusM, directions };
@@ -713,8 +716,39 @@ async function goToAddress(address, floor, radiusM) {
   const blocked = report.directions.filter(d => d.status === 'blocked').length;
   const open = report.directions.filter(d => d.status === 'open').length;
   status.textContent = `${data.features.length} buildings | ${open} open / ${blocked} blocked / ${report.directions.length - open - blocked} uncertain (floor ${floor})`;
+  renderSideBreakdown(report);
 
   loadContextLayers(geo.lat, geo.lon, radiusM);
+}
+
+// Same 4-side simplification as facade_blockage_report.py's side_breakdown()
+// -- N/E/S/W as 90deg bearing quadrants, not the building's true facade
+// angles. Keep both in sync if this logic changes.
+const SIDES_JS = {
+  N: b => b >= 315 || b < 45,
+  E: b => b >= 45 && b < 135,
+  S: b => b >= 135 && b < 225,
+  W: b => b >= 225 && b < 315,
+};
+
+function renderSideBreakdown(report) {
+  const el = document.getElementById('side-breakdown');
+  if (!el) return;
+  const rows = Object.entries(SIDES_JS).map(([side, inRange]) => {
+    const bucket = report.directions.filter(d => inRange(d.bearing));
+    const n = bucket.length || 1;
+    const blockedPct = Math.round(100 * bucket.filter(d => d.status === 'blocked').length / n);
+    const uncertainPct = Math.round(100 * bucket.filter(d => d.status === 'uncertain').length / n);
+    const openPct = 100 - blockedPct - uncertainPct;
+    return `<tr><td>${side}</td><td>${blockedPct}%</td><td>${uncertainPct}%</td><td>${openPct}%</td></tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="margin-bottom:4px;color:#8b96ad">% blocked per side, floor ${report.floor}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:#8b96ad"><th style="text-align:left">Side</th><th>Blocked</th><th>Uncertain</th><th>Open</th></tr>
+      ${rows}
+    </table>
+  `;
 }
 
 // ---- context layers: roads, water, transit -- purely visual/orientation,
